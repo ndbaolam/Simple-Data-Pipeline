@@ -1,2 +1,4 @@
 venv
 .vscode
+.env
+run_env/logs/*

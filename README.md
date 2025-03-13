@@ -62,8 +62,8 @@ Ensure you have the following installed:
    ```
 3. Access the Airflow UI:
    - Open `http://localhost:8080`
-   - Username: `admin`
-   - Password: `admin`
+   - Username: `airflow`
+   - Password: `airflow`
 
 4. Access the Minio UI:
    - Open `http://localhost:9001`
