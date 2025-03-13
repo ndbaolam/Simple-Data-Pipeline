@@ -1,0 +1,16 @@
+data:
+  folder_path: delta-lake_data/datalake
+
+datalake:
+  endpoint: localhost:9000
+  bucket_name: my-bucket
+  folder_name: datalake
+  access_key: minio_admin
+  secret_key: minio_admin
+
+source: 
+  kafka_topics: users_created
+  kafka.bootstrap.servers: localhost:9092
+  kafka_options:     
+    startingOffsets: earliest
+    endingOffsets: latest

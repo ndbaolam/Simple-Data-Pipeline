@@ -4,9 +4,12 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
+from utils.helpers import load_cfg
+
 from delta import *
-from minio import Minio
 import json
+
+CFG_FILe = "./config.yaml"
 
 scala_version = '2.12'
 spark_version = '3.5.5'
@@ -14,7 +17,8 @@ spark_version = '3.5.5'
 packages = [
   f'org.apache.spark:spark-sql-kafka-0-10_{scala_version}:{spark_version}',
   'org.apache.kafka:kafka-clients:3.9.0',  
-  'org.apache.hadoop:hadoop-aws:3.3.4'
+  'org.apache.hadoop:hadoop-aws:3.3.4',
+  'io.minio:minio:8.5.2'
 ]
 
 schema = T.StructType([
@@ -31,32 +35,21 @@ schema = T.StructType([
 ])
 
 class StreamingIngestion():
-  def __init__(self, config: dict) -> None:
+  def __init__(self, config) -> None:
     self.spark = (SparkSession.builder
               .master("local[*]")
               .appName("Spark Data Streaming")
-              .config("spark.jars.packages", ",".join(packages))              
-              .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-              .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-              .getOrCreate())
+              .config("spark.jars.packages", ",".join(packages))                            
+              .getOrCreate())    
 
-    self.load_config(self.spark.sparkContext)    
+    self.load_config(self.spark.sparkContext, config=config)    
     
-    self.config = config
+    self.config = config    
 
-    self.source_topics = config['source']['kafka_topics']
-
-    self.minio = Minio(
-      endpoint=self.config['minio']['endpoint'],
-      secret_key=self.config['minio']['secret_key'],
-      access_key=self.config['minio']['access_key'],
-      secure=False
-    )
-
-  def load_config(self, spark_context: SparkContext):
-    spark_context._jsc.hadoopConfiguration().set("fs.s3a.access.key", "minio_admin")
-    spark_context._jsc.hadoopConfiguration().set("fs.s3a.secret.key", "minio_admin")
-    spark_context._jsc.hadoopConfiguration().set("fs.s3a.endpoint", "http://localhost:9000")
+  def load_config(self, spark_context: SparkContext, config):
+    spark_context._jsc.hadoopConfiguration().set("fs.s3a.access.key", config['datalake']['access_key'])
+    spark_context._jsc.hadoopConfiguration().set("fs.s3a.secret.key", config['datalake']['secret_key'])
+    spark_context._jsc.hadoopConfiguration().set("fs.s3a.endpoint", config['datalake']['endpoint'])
     spark_context._jsc.hadoopConfiguration().set("fs.s3a.path.style.access", "true")
     spark_context._jsc.hadoopConfiguration().set("fs.s3a.connection.ssl.enabled", "false")
     spark_context._jsc.hadoopConfiguration().set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
@@ -64,33 +57,32 @@ class StreamingIngestion():
 
 
   def read(self) -> DataFrame:
-    return (self.spark
-            .readStream
-            .format("kafka")            
-            .option("kafka.bootstrap.servers", self.config['source']['kafka_options']['kafka.bootstrap.servers'])
-            .option("startingOffsets", self.config['source']['kafka_options']['startingOffsets'])
-            .option("subscribe", self.source_topics)            
-            .load())
+    return self.spark \
+            .readStream \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", self.config['source']['kafka.bootstrap.servers']) \
+            .option("startingOffsets", self.config['source']['kafka_options']['startingOffsets']) \
+            .option("subscribe", self.config['source']['kafka_topics']) \
+            .load()
   
   def write_to_console(self, df: DataFrame) -> None:
-    (df.writeStream
-     .format(self.config["sink"]["write_format"])
-     .outputMode(self.config["sink"]["write_output_mode"])    
-     .start()
-     .awaitTermination())
+    try:
+      df.writeStream \
+      .format("console") \
+      .outputMode("append") \
+      .start() \
+      .awaitTermination()
+    except Exception as e:
+      print(e)
     
-  def write_to_minio(self, df: DataFrame, minio_bucket: str) -> None:
-    found = self.minio.bucket_exists(minio_bucket)
-    if not found:
-      self.minio.make_bucket(minio_bucket)
-
+  def write_to_delta(self, df: DataFrame, minio_bucket: str) -> None:
     df.writeStream \
-    .format("parquet") \
-    .outputMode("append") \
-    .option("path", f"s3a://{minio_bucket}/delta-lake") \
-    .option("checkpointLocation", f"s3a://{minio_bucket}/checkpoint") \
+    .format('delta') \
+    .outputMode('append') \
+    .option("checkpointLocation", f"s3a://{self.config['datalake']['bucket_name']}/checkpoints/") \
+    .option("path", f"s3a://{self.config['datalake']['bucket_name']}/streaming-data/") \
     .start() \
-    .awaitTermination()
+    .awaitTermination()    
     
   def process(self, df: DataFrame) -> DataFrame:
     return (df.selectExpr("CAST(value AS STRING) as json_data")
@@ -100,28 +92,11 @@ class StreamingIngestion():
   def execute(self):
     raw_df = self.read()
     transformed_df = self.process(raw_df)
-    self.write_to_minio(transformed_df, minio_bucket=self.config['minio']['bucket'])
+    self.write_to_console(transformed_df)    
 
 if __name__ == "__main__":
-  config = {
-    "source": {
-      "kafka_topics": "users_created",
-      "kafka_options": {
-        "kafka.bootstrap.servers": "localhost:9092",
-        "startingOffsets": "earliest",
-      }
-    },
-    "sink": {
-      "write_format": "console",
-      "write_output_mode": "append",      
-    },
-    "minio": {
-      "endpoint": "localhost:9000",
-      "access_key": "minio_admin",
-      "secret_key": "minio_admin",   
-      "bucket": "my-bucket"
-    }
-  }
+  config = load_cfg(CFG_FILe) 
 
   app = StreamingIngestion(config=config)
   app.execute()  
+  app.spark.stop()
