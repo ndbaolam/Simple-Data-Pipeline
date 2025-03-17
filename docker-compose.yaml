@@ -371,21 +371,36 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  minio:
-    image: minio/minio
-    container_name: datalake-minio
-    hostname: minio
+  spark-master:
+    image: bitnami/spark:latest
+    command: bin/spark-class org.apache.spark.deploy.master.Master
     ports:
-      - "9000:9000" # For API requests
-      - "9001:9001" # For UI access
-    volumes:
-      - minio_storage:/data
+      - "9090:8080" #Port UI: 9090
+      - "7077:7077"
+    
+  spark-worker:
+    image: bitnami/spark:latest
+    command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    depends_on:
+      - spark-master
     environment:
-      MINIO_ACCESS_KEY: minio_admin
-      MINIO_SECRET_KEY: minio_admin
-      MINIO_DEFAULT_BUCKETS: my-bucket
-    command: server --console-address ":9001" /data    
+      SPARK_MODE: worker
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 1g
+      SPARK_MASTER_URL: spark://spark-master:7077
 
-volumes:
-  minio_storage:
+  cassandra_db:
+    image: cassandra:4.0  
+    container_name: cassandra
+    hostname: cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      MAX_HEAP_SIZE: "512M"
+      HEAP_NEWSIZE: "100M"
+      CASSANDRA_USERNAME: "cassandra"
+      CASSANDRA_PASSWORD: "cassandra"
+    restart: always
+
+volumes:  
   postgres-db-volume:

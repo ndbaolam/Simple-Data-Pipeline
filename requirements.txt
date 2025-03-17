@@ -1,6 +1,5 @@
 apache-airflow==2.10.5
 pyspark==3.5.5
 spark==0.2.1
-minio==7.1.16
-delta-spark==3.1.0
 kafka-python==2.0.6
+cassandra-driver==3.29.2

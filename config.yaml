@@ -1,12 +1,9 @@
 data:
   folder_path: delta-lake_data/datalake
 
-datalake:
-  endpoint: localhost:9000
-  bucket_name: my-bucket
-  folder_name: datalake
-  access_key: minio_admin
-  secret_key: minio_admin
+cassandra:
+  key_space: spark_streams
+  table_name: created_users
 
 source: 
   kafka_topics: users_created
