@@ -15,7 +15,7 @@ packages = [
 class StreamingIngestion():
   def __init__(self, config) -> None: 
     self.spark = (SparkSession.builder
-              .master("local[*]")
+              #.master("local[*]")
               .appName("Spark Data Streaming")
               .config("spark.jars.packages", ",".join(packages))  
               .config("spark.cassandra.connection.host", "localhost")
